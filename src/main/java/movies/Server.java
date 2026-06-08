@@ -49,7 +49,7 @@ public class Server {
 	private static final AtomicReference<Throwable> WARMUP_ERROR = new AtomicReference<>();
 
 	private static final Supplier<List<Movie>> MOVIES = cache(Server::loadMovies);
-	private static final Supplier<List<Credit>> CREDITS = cache(Server::loadCredits);
+	private static final Supplier<Map<String, List<Credit>>> CREDITS_BY_MOVIE_ID = cache(Server::loadCreditsByMovieId);
 	private static final Supplier<List<Movie>> SORTED_MOVIES = cache(() -> sortByDescReleaseDate(MOVIES.get()));
 	private static final Supplier<List<MovieWithCredits>> MOVIES_WITH_CREDITS = cache(() -> 
 		MOVIES.get().stream()

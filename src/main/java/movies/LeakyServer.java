@@ -71,7 +71,7 @@ public class LeakyServer {
 	private static final AtomicReference<Throwable> WARMUP_ERROR = new AtomicReference<>();
 
 	private static final Supplier<List<Movie>> MOVIES = cache(LeakyServer::loadMovies);
-	private static final Supplier<List<Credit>> CREDITS = cache(LeakyServer::loadCredits);
+	private static final Supplier<Map<String, List<Credit>>> CREDITS_BY_MOVIE_ID = cache(LeakyServer::loadCreditsByMovieId);
 	private static final Supplier<List<Movie>> SORTED_MOVIES = cache(() -> sortByDescReleaseDate(MOVIES.get()));
 	private static final Supplier<List<MovieWithCredits>> MOVIES_WITH_CREDITS = cache(() -> MOVIES.get().stream()
 			.map(movie -> new MovieWithCredits(movie, creditsForMovie(movie)))

@@ -49,7 +49,7 @@ public class IntroServer {
 	private static final AtomicReference<Throwable> WARMUP_ERROR = new AtomicReference<>();
 
 	private static final Supplier<List<Movie>> MOVIES = cache(IntroServer::loadMovies);
-	private static final Supplier<List<Credit>> CREDITS = cache(IntroServer::loadCredits);
+	private static final Supplier<Map<String, List<Credit>>> CREDITS_BY_MOVIE_ID = cache(IntroServer::loadCreditsByMovieId);
 	private static final Supplier<List<Movie>> SORTED_MOVIES = cache(() -> sortByDescReleaseDate(MOVIES.get()));
 	private static final int MOVIES_API_PORT = Integer.parseInt(System.getenv("MOVIES_API_PORT"));
 
