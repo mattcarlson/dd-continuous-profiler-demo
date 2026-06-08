@@ -44,9 +44,8 @@ public class IntroServer {
 	private static final String MONGO_URI = System.getenv("MONGO_URI");
 
 	private static final Supplier<List<Movie>> MOVIES = cache(IntroServer::loadMovies);
-	private static final Supplier<List<Credit>> CREDITS = cache(IntroServer::loadCredits);
+	private static final Supplier<Map<String, List<Credit>>> CREDITS_BY_MOVIE_ID = cache(IntroServer::loadCreditsByMovieId);
 	private static final int MOVIES_API_PORT = Integer.parseInt(System.getenv("MOVIES_API_PORT"));
-	// CREDITS_BY_MOVIE_ID goes in here!
 
 	public static void main(String[] args) {
 		port(MOVIES_API_PORT);
@@ -60,7 +59,7 @@ public class IntroServer {
 
 		// Warm these up at application start
 		MOVIES.get();
-		CREDITS.get();
+		CREDITS_BY_MOVIE_ID.get();
 
 		var version = System.getProperty("dd.version");
 		LOG.info("Running version " + (version != null ? version.toLowerCase() : "(not set)") + " with pid " + ProcessHandle.current().pid());
@@ -116,7 +115,7 @@ public class IntroServer {
 	}
 
 	private static List<Credit> creditsForMovie(Movie movie) {
-		return CREDITS.get().stream().filter(c -> c.id.equals(movie.id)).toList();
+		return CREDITS_BY_MOVIE_ID.get().get(movie.id);
 	}
 
 	private static Map<CrewRole, Long> crewCountForMovie(List<Credit> credits) {
@@ -190,6 +189,10 @@ public class IntroServer {
 			var creditsCollection = mongoClient.getDatabase("moviesDB").getCollection("credits");
 			return StreamSupport.stream(creditsCollection.find().batchSize(5_000).map(Credit::new).spliterator(), false).toList();
 		}
+	}
+
+	private static Map<String, List<Credit>> loadCreditsByMovieId() {
+		return loadCredits().stream().collect(Collectors.groupingBy(c -> c.id));
 	}
 
 	public record Movie(
