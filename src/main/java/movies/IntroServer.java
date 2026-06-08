@@ -45,8 +45,8 @@ public class IntroServer {
 
 	private static final Supplier<List<Movie>> MOVIES = cache(IntroServer::loadMovies);
 	private static final Supplier<List<Credit>> CREDITS = cache(IntroServer::loadCredits);
+	private static final Supplier<Map<String, List<Credit>>> CREDITS_BY_MOVIE_ID = cache(() -> CREDITS.get().stream().collect(Collectors.groupingBy(c -> c.id)));
 	private static final int MOVIES_API_PORT = Integer.parseInt(System.getenv("MOVIES_API_PORT"));
-	// CREDITS_BY_MOVIE_ID goes in here!
 
 	public static void main(String[] args) {
 		port(MOVIES_API_PORT);
@@ -84,13 +84,14 @@ public class IntroServer {
 	private static Object creditsEndpoint(Request req, Response res) {
 		var movies = MOVIES.get().stream();
 		var query = req.queryParamOrDefault("q", req.queryParams("query"));
+		var limit = Integer.valueOf(req.queryParamOrDefault("n", "10"));
 
 		if (query != null) {
 			var p = Pattern.compile(query, Pattern.CASE_INSENSITIVE);
 			movies = movies.filter(m -> m.title != null && p.matcher(m.title).find());
 		}
 
-		var moviesWithCredits = movies.map(movie -> new MovieWithCredits(movie, creditsForMovie(movie)));
+		var moviesWithCredits = movies.limit(limit).map(movie -> new MovieWithCredits(movie, creditsForMovie(movie)));
 		return replyJSON(res, moviesWithCredits);
 	}
 
@@ -116,7 +117,7 @@ public class IntroServer {
 	}
 
 	private static List<Credit> creditsForMovie(Movie movie) {
-		return CREDITS.get().stream().filter(c -> c.id.equals(movie.id)).toList();
+		return CREDITS_BY_MOVIE_ID.get().getOrDefault(movie.id, List.of());
 	}
 
 	private static Map<CrewRole, Long> crewCountForMovie(List<Credit> credits) {
