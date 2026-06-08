@@ -117,13 +117,14 @@ public class IntroServer {
 	private static Object creditsEndpoint(Request req, Response res) {
 		var movies = MOVIES.get().stream();
 		var query = req.queryParamOrDefault("q", req.queryParams("query"));
+		var limit = Integer.valueOf(req.queryParamOrDefault("n", "10"));
 
 		if (query != null) {
 			var p = Pattern.compile(query, Pattern.CASE_INSENSITIVE);
 			movies = movies.filter(m -> m.title != null && p.matcher(m.title).find());
 		}
 
-		var moviesWithCredits = movies.map(movie -> new MovieWithCredits(movie, creditsForMovie(movie)));
+		var moviesWithCredits = movies.limit(limit).map(movie -> new MovieWithCredits(movie, creditsForMovie(movie)));
 		return replyJSON(res, moviesWithCredits);
 	}
 
