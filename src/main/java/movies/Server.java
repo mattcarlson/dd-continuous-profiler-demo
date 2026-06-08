@@ -18,6 +18,9 @@ import java.util.Map;
 import java.util.Random;
 import java.util.function.Function;
 import java.util.regex.Pattern;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -42,33 +45,63 @@ public class Server {
 	private static final Gson GSON = new GsonBuilder().setLenient().setPrettyPrinting().create();
 	private static final Logger LOG = LoggerFactory.getLogger(Server.class);
 	private static final String MONGO_URI = System.getenv("MONGO_URI");
+	private static final AtomicBoolean WARMUP_COMPLETE = new AtomicBoolean(false);
+	private static final AtomicReference<Throwable> WARMUP_ERROR = new AtomicReference<>();
 
 	private static final Supplier<List<Movie>> MOVIES = cache(Server::loadMovies);
-	private static final Supplier<List<Credit>> CREDITS = cache(Server::loadCredits);
+	private static final Supplier<Map<String, List<Credit>>> CREDITS_BY_MOVIE_ID = cache(Server::loadCreditsByMovieId);
 	private static final Supplier<List<MovieWithCredits>> MOVIES_WITH_CREDITS = cache(() -> 
 		MOVIES.get().stream()
 			.map(movie -> new MovieWithCredits(movie, creditsForMovie(movie)))
 			.toList()
 	);
 	private static final int MOVIES_API_PORT = Integer.parseInt(System.getenv("MOVIES_API_PORT"));
-	private static final Supplier<Map<String, List<Credit>>> CREDITS_BY_MOVIE_ID = cache(() -> CREDITS.get().stream().collect(Collectors.groupingBy(c -> c.id)));
 
 	public static void main(String[] args) {
 		port(MOVIES_API_PORT);
 		ipAddress("0.0.0.0");
 		get("/", Server::randomMovieEndpoint);
+		get("/ready", Server::readyEndpoint);
 		get("/credits", Server::creditsEndpoint);
 		get("/movies", Server::moviesEndpoint);
 		get("/old-movies", Server::oldMoviesEndpoint);
 		get("/stats", Server::statsEndpoint);
 		exception(Exception.class, (exception, request, response) -> exception.printStackTrace());
 
-		// Warm these up at application start
-		MOVIES.get();
-		CREDITS.get();
+		startWarmup();
 
 		var version = System.getProperty("dd.version");
 		LOG.info("Running version " + (version != null ? version.toLowerCase() : "(not set)") + " with pid " + ProcessHandle.current().pid());
+	}
+
+	private static Object readyEndpoint(Request req, Response res) {
+		var warmupError = WARMUP_ERROR.get();
+		if (warmupError != null) {
+			res.status(500);
+			return replyJSON(res, Map.of("ready", false, "error", warmupError.getClass().getSimpleName()));
+		}
+		if (WARMUP_COMPLETE.get()) {
+			res.status(200);
+			return replyJSON(res, Map.of("ready", true));
+		}
+		res.status(503);
+		return replyJSON(res, Map.of("ready", false));
+	}
+
+	private static void startWarmup() {
+		CompletableFuture.runAsync(() -> {
+			var startNanos = System.nanoTime();
+			try {
+				var moviesWarmup = CompletableFuture.runAsync(MOVIES::get);
+				var creditsWarmup = CompletableFuture.runAsync(CREDITS_BY_MOVIE_ID::get);
+				CompletableFuture.allOf(moviesWarmup, creditsWarmup).join();
+				WARMUP_COMPLETE.set(true);
+				LOG.info("Startup warmup finished in {} ms", (System.nanoTime() - startNanos) / 1_000_000);
+			} catch (Exception e) {
+				WARMUP_ERROR.set(e);
+				LOG.error("Startup warmup failed", e);
+			}
+		});
 	}
 
 	private static void collectMetrics(Request req) {
@@ -122,7 +155,7 @@ public class Server {
 	}
 
 	private static List<Credit> creditsForMovie(Movie movie) {
-		return CREDITS_BY_MOVIE_ID.get().get(movie.id);
+		return CREDITS_BY_MOVIE_ID.get().getOrDefault(movie.id, List.of());
 	}
 
 	private static Map<CrewRole, Long> crewCountForMovie(List<Credit> credits) {
@@ -189,12 +222,14 @@ public class Server {
 		}
 	}
 
-	private static List<Credit> loadCredits() {
+	private static Map<String, List<Credit>> loadCreditsByMovieId() {
 		try (
 			var mongoClient = MongoClients.create(MONGO_URI)
 		) {
 			var creditsCollection = mongoClient.getDatabase("moviesDB").getCollection("credits");
-			return StreamSupport.stream(creditsCollection.find().batchSize(5_000).map(Credit::new).spliterator(), false).toList();
+			return StreamSupport
+				.stream(creditsCollection.find().batchSize(5_000).map(Credit::new).spliterator(), false)
+				.collect(Collectors.groupingBy(credit -> credit.id));
 		}
 	}
 
