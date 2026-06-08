@@ -71,7 +71,8 @@ public class LeakyServer {
 	private static final AtomicReference<Throwable> WARMUP_ERROR = new AtomicReference<>();
 
 	private static final Supplier<List<Movie>> MOVIES = cache(LeakyServer::loadMovies);
-	private static final Supplier<Map<String, List<Credit>>> CREDITS_BY_MOVIE_ID = cache(LeakyServer::loadCreditsByMovieId);
+	private static final Supplier<List<Credit>> CREDITS = cache(LeakyServer::loadCredits);
+	private static final Supplier<List<Movie>> SORTED_MOVIES = cache(() -> sortByDescReleaseDate(MOVIES.get()));
 	private static final Supplier<List<MovieWithCredits>> MOVIES_WITH_CREDITS = cache(() -> MOVIES.get().stream()
 			.map(movie -> new MovieWithCredits(movie, creditsForMovie(movie)))
 			.toList()
@@ -151,7 +152,7 @@ public class LeakyServer {
 		return replyJSON(res, moviesWithCredits);
 	}
 
-	private static synchronized Object statsEndpoint(Request req, Response res) {
+	private static Object statsEndpoint(Request req, Response res) {
 		collectMetrics(req);
 		var movies = MOVIES.get().stream();
 		var query = req.queryParamOrDefault("q", req.queryParams("query"));
@@ -185,8 +186,7 @@ public class LeakyServer {
 
 	private static Object moviesEndpoint(Request req, Response res) {
 		collectMetrics(req);
-		var movies = MOVIES.get();
-		movies = sortByDescReleaseDate(movies);
+		var movies = SORTED_MOVIES.get();
 		var query = req.queryParamOrDefault("q", req.queryParams("query"));
 		if (query != null) {
 			movies = movies.stream().filter(m -> m.title.toUpperCase().matches(".*" + query.toUpperCase() + ".*"))
@@ -213,16 +213,16 @@ public class LeakyServer {
 		var limit = Integer.valueOf(req.queryParamOrDefault("n", "10"));
 
 		var oldMovies = MOVIES.get().stream().filter(m -> isOlderThan(year, m)).toList();
-		LOG.atDebug().log(() -> "Found the following oldMovies: " + oldMovies);
+		LOG.atDebug().log(() -> "Found " + oldMovies.size() + " oldMovies");
 		var limitedMovies = oldMovies.stream().limit(limit).toList();
-		LOG.atDebug().log(() -> "With limit " + limit + ", the result was: " + limitedMovies);
+		LOG.atDebug().log(() -> "With limit " + limit + ", returning " + limitedMovies.size() + " oldMovies");
 
 		return replyJSON(res, limitedMovies);
 	}
 
 	private static boolean isOlderThan(String year, Movie movie) {
 		var result = movie.releaseDate.compareTo(year) < 0;
-		LOG.atDebug().log(() -> "Is " + movie + " older than " + year + "? " + result);
+		LOG.atDebug().log(() -> "Is movie " + movie.id + " older than " + year + "? " + result);
 		return result;
 	}
 
@@ -302,12 +302,7 @@ public class LeakyServer {
 				.collect(Collectors.toMap(CrewRole::toString, Function.identity()));
 
 		public static CrewRole parseRole(String inputRole) {
-			try {
-				return CrewRole.valueOf(inputRole);
-			} catch (IllegalArgumentException e) {
-				LOG.trace("Unknown role", e);
-				return CrewRole.Other;
-			}
+			return ROLES_MAP.getOrDefault(inputRole, CrewRole.Other);
 		}
 	}
 
